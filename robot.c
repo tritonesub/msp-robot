@@ -2,14 +2,15 @@
 #include <msp430.h>				
 #include <msp430g2253.h>
 
-#define STP 0x00;
-#define FWD 0x01;
-#define BWD 0x02;
-#define RTN 0x04;
-#define LTN 0x08;
-#define PROX_D 400;
+#define STP 0x0
+#define FWD 0x01
+#define BWD 0x02
+#define RTN 0x04
+#define LTN 0x08
+#define PROX_D 400
 
 volatile unsigned int drive = STP;
+volatile unsigned int prev_drive = STP;
 volatile unsigned int prox_v = 0;
 
 int main(void) {
@@ -42,30 +43,43 @@ int main(void) {
     ADC10CTL0 = SREF_0 + ADC10SHT_3 + ADC10ON + ADC10IE;
     ADC10AE0 |= BIT7;
 
+    drive = FWD;                         //start driving
 
-    _BIS_SR(CPUOFF + GIE);               // Enter LPM0 with all interrupts
+    _bis_SR_register(CPUOFF + GIE);               // Enter LPM0 with all interrupts
 
     while(1) {
         switch(drive) {
-            case: STP
+            case STP:
                 P2OUT &= ~(BIT0 + BIT1 + BIT2 + BIT3 + BIT4 + BIT5);
+                drive = BWD;
+                continue;
             break;
             
-            case: FWD
+            case FWD:
+                P1OUT|= BIT6;
+                P2OUT &= ~BIT1;
+                P2OUT |= BIT2;
+                P2OUT |= BIT0;          //Enable
             break;
 
-            case: BWD
-            break
-
-            case: RTN
+            case BWD:
+                P2OUT &= ~BIT2;
+                P2OUT |= BIT1;
+                P2OUT |= BIT0;
             break;
 
-            case: LTN
+            case RTN:
+            //check if good to move forward 
+            break;
+
+            case LTN:
             break;
 
             default:
                 drive = STP;
         }
+    
+        _bis_SR_register(CPUOFF + GIE);
     }
 }
 
@@ -78,15 +92,22 @@ void __attribute__((interrupt(ADC10_VECTOR))) ADC10_ISR(void)
 {
     prox_v = ADC10MEM;
     if(prox_v > PROX_D) {
-        P1OUT |= BIT6;
-        P2OUT &= ~BIT1;
-        P2OUT |= BIT2;
-        P2OUT |= BIT0;
+        if(drive == FWD) {
+            prev_drive = drive;
+            drive = STP;
+            _bic_SR_register_on_exit(CPUOFF);
+        }
     }
-    else {
-        P1OUT &= ~BIT6;
-        P2OUT &= ~BIT0;
-        P2OUT &= ~BIT2;
+    else if(drive != FWD) {
+        prev_drive = drive;
+        if(drive == BWD) {
+
+                //mod prox_v to decide whether to turn right or not
+        }
+        else {
+            drive = FWD;
+        }
+        _bic_SR_register_on_exit(CPUOFF);
     }
 }
 
