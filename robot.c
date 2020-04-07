@@ -12,6 +12,9 @@
 volatile unsigned int drive = STP;
 volatile unsigned int prev_drive = STP;
 volatile unsigned int prox_v = 0;
+volatile unsigned int drive_counter = 0;
+
+void switch_drive(int);
 
 int main(void) {
 	WDTCTL = WDTPW | WDTHOLD;		     // Stop watchdog timer
@@ -22,13 +25,15 @@ int main(void) {
 
     P1OUT &= 0x00;                       // Shut 'er down
     P1DIR &= 0x00;
+    P2OUT &= 0x00;
+    P2DIR &= 0x00;
 
     P2SEL &= ~BIT0;
     P2SEL2 &= ~BIT0;
     
     P1DIR |= BIT0 + BIT6;                // P1.0 and P1.6 pin output the rest are input
-    P2DIR |= BIT0 + BIT1 + BIT2 + BIT3 + BIT4 + BIT5;
-    P2OUT &= ~(BIT0 + BIT1 + BIT2 + BIT3 + BIT4 + BIT5);
+    P2DIR |= BIT0 + BIT1 + BIT2 + BIT3 + BIT4;
+    P2OUT &= ~(BIT0 + BIT1 + BIT2 + BIT3 + BIT4);
     //P1OUT |= BIT0;
     P1REN |= BIT3;                       // Enable internal pull-up
     P1OUT |= BIT3;                       // Select pullup
@@ -50,29 +55,64 @@ int main(void) {
     while(1) {
         switch(drive) {
             case STP:
-                P2OUT &= ~(BIT0 + BIT1 + BIT2 + BIT3 + BIT4 + BIT5);
-                drive = BWD;
-                continue;
+                P2OUT &= ~BIT0;
+                switch_drive(BWD);
+                P1OUT ^= BIT0;
             break;
             
             case FWD:
-                P1OUT|= BIT6;
                 P2OUT &= ~BIT1;
+                P2OUT &= ~BIT4;
                 P2OUT |= BIT2;
+                P2OUT |= BIT3;
+
                 P2OUT |= BIT0;          //Enable
             break;
 
             case BWD:
-                P2OUT &= ~BIT2;
-                P2OUT |= BIT1;
-                P2OUT |= BIT0;
+                if(drive_counter == 0) {
+                    P2OUT &= ~BIT2;
+                    P2OUT &= ~BIT3;
+                    P2OUT |= BIT1;
+                    P2OUT |= BIT4; 
+                    P2OUT |= BIT0;
+                }
+                drive_counter++;
+                if(drive_counter > 12) {
+                    switch_drive((prox_v % 2) ? RTN : LTN);
+                }
             break;
 
             case RTN:
-            //check if good to move forward 
+                if(drive_counter == 0) {
+                    //pins to drive right
+                    P2OUT &= ~BIT0;
+                    P2OUT &= ~BIT4;
+                    P2OUT &= ~BIT2;
+                    P2OUT |= BIT1;
+                    P2OUT |= BIT3;
+                    P2OUT |= BIT0;
+                }
+                drive_counter++;
+                if(drive_counter > 5) {
+                    switch_drive(FWD);
+                }
             break;
 
             case LTN:
+                if(drive_counter == 0) {
+                    //pins to drive left
+                    P2OUT &= ~BIT0;
+                    P2OUT &= ~BIT3;
+                    P2OUT &= ~BIT1;
+                    P2OUT |= BIT2;
+                    P2OUT |= BIT4;
+                    P2OUT |= BIT0;
+                }
+                drive_counter++;
+                if(drive_counter > 5) {
+                    switch_drive(FWD);
+                }
             break;
 
             default:
@@ -90,29 +130,29 @@ void __attribute__((interrupt(TIMER0_A0_VECTOR))) TimerA_ISR(void)
 
 void __attribute__((interrupt(ADC10_VECTOR))) ADC10_ISR(void) 
 {
+    //if we're driving forward and are not within range of an obstacle, keep driving forward. 
+    //if we approach and obstacle or are backing up or turning exit low CPU for main loop to process.
     prox_v = ADC10MEM;
     if(prox_v > PROX_D) {
+        P1OUT ^= BIT6;
         if(drive == FWD) {
-            prev_drive = drive;
-            drive = STP;
+            switch_drive(STP);
             _bic_SR_register_on_exit(CPUOFF);
         }
     }
-    else if(drive != FWD) {
-        prev_drive = drive;
-        if(drive == BWD) {
-
-                //mod prox_v to decide whether to turn right or not
-        }
-        else {
-            drive = FWD;
-        }
+//    else if(drive != FWD) {
         _bic_SR_register_on_exit(CPUOFF);
-    }
+//    }
 }
 
 void __attribute__((interrupt(PORT1_VECTOR))) Port1_ISR(void)
 {
     P1OUT ^= BIT6;              // Toggle P1.0
     P1IFG &= ~BIT3;             // P1.3 interrupt flag cleared
+}
+
+void switch_drive(int newDrive) {
+    prev_drive = drive;
+    drive = newDrive;
+    drive_counter = 0;
 }
